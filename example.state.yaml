@@ -1,0 +1,10 @@
+income: 1000
+upkeep: 500
+money_goal: 10_000
+accounts:
+  - name: Checking-Account
+    balance: 1000
+    interest: 0
+  - name: Investment-Account
+    balance: 1000
+    interest: 0.03

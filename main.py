@@ -4,102 +4,152 @@ Script to calculate finances into the future
 
 Change the state.yaml file to fit your needs
 """
-import sys
 import yaml
 
+class Account(object):
+    def __init__(self, name: str, start_balance: float = 0.0, yearly_interest: float = 0.0):
+        if not name:
+            raise ValueError("Name cannot be empty")
+        self.name = name
+        self.balance = start_balance
+        if not (0 <= yearly_interest <= 1):
+            raise ValueError("Interest must be between 0 and 1")
+        self.interest = ((yearly_interest + 1) ** (1/12)) - 1
+        self.tracker_total_income = 0.0
+        self.tracker_total_interest = 0.0
+        self.tracker_monthly_income = 0.0
+        self.tracker_monthly_interest = 0.0
 
-def print_status():
-    """
-    Prints the Status information and calulates growth
-    """
-    plus_bank = 0
-    plus_invest = 0
-    plus_kapital = 0
-    perc_bank = 0
-    perc_invest = 0
-    perc_kapital = 0
-    if bank != 0:
-        plus_bank = bank - prev_bank
-        perc_bank = round((plus_bank / bank) * 100, 2)
-        if plus_bank < 0 < perc_bank:
-            perc_bank *= -1
-    if invest != 0:
-        plus_invest = invest - prev_invest
-        perc_invest = round((plus_invest / invest) * 100, 2)
-        if plus_invest < 0 < perc_invest:
-            perc_invest *= -1
-    if kapital != 0:
-        plus_kapital = kapital - prev_kapital
-        perc_kapital = round((plus_kapital / kapital) * 100, 2)
-        if plus_kapital < 0 < perc_kapital:
-            perc_kapital *= -1
-    print(f"Bank: {bank:+.2f}€ ({plus_bank:+.2f}€ {perc_bank:+.2f}%)")
-    print(f"Inv.: {invest:+.2f}€ ({plus_invest:+.2f}€ {perc_invest:+.2f}%)")
-    print(f"Ges.: {kapital:+.2f}€ ({plus_kapital:+.2f}€ {perc_kapital:+.2f}%)")
-    print("Mon.:", months)
+    def deposit(self, amount):
+        self.balance += amount
+        self.tracker_total_income += amount
+        self.tracker_monthly_income += amount
 
+    def _interest(self):
+        if not self.interest:
+            return
+        pre_balance = self.balance
+        self.balance = self.balance * (1 + self.interest)
+        self.tracker_total_interest += self.balance - pre_balance
+        self.tracker_monthly_interest += self.balance - pre_balance
 
-data = {}
+    def monthly(self):
+        self._interest()
+        self._print_full()
+        self.tracker_monthly_income = 0.0
+        self.tracker_monthly_interest = 0.0
 
-with open("state.yaml", "r", encoding="utf-8") as f:
-    data = yaml.load(f, Loader=yaml.SafeLoader)
-data["gewinn"] = data["einkommen"] - data["unterhalt"]
-data["investing"] = 0
-if data["gewinn"] > 0:
-    data["investing"] = round(data["gewinn"] * data["invest_perc"], 2)
-data["gewinn"] = data["gewinn"] - data["investing"]
+    def _print_full(self):
+        print(f"Monthly Report: {self.name}")
+        if self.tracker_monthly_income:
+            print(f" Income  : {self.tracker_monthly_income:+15_.2f}€")
+        if self.tracker_monthly_interest:
+            print(f" Interest: {self.tracker_monthly_interest:+15_.2f}€ ({self.interest * 100:-.4f}%)")
+        print(f" Balance : {self.balance:-15_.2f}€")
 
-for key, value in data.items():
-    if 0 < value < 1:
-        print(f"{key}:\t{value*100}%")
+    def __str__(self):
+        output = ""
+        output += f"Account Report: {self.name}\n"
+        if self.tracker_total_income:
+            output += f" Income  : {self.tracker_total_income:+15_.2f}€\n"
+        if self.tracker_total_interest:
+            output += f" Interest: {self.tracker_total_interest:+15_.2f}€\n"
+        output += f" Balance : {self.balance:-15_.2f}€"
+        return output
+
+class Bank(object):
+    def __init__(self, name: str):
+        self.name = name
+        self.accounts = []
+        self.total = 0.0
+
+    def import_dict(self, data: dict):
+        for raw_account in data:
+            account = Account(
+                    name = raw_account["name"],
+                    start_balance = raw_account["balance"],
+                    yearly_interest = raw_account["interest"]
+                    )
+            self.accounts.append(account)
+        self._calc_total()
+
+    def deposit(self, account_name, amount):
+        account = [account for account in self.accounts if account.name == account_name]
+        if len(account) != 1:
+            raise KeyError("No Account with that name found")
+        account = account[0]
+        account.deposit(amount)
+
+    def register_account(self, account: Account):
+        self.accounts.append(account)
+        self._calc_total()
+
+    def _calc_total(self):
+        self.total = 0
+        for account in self.accounts:
+            self.total += account.balance
+
+    def monthly(self):
+        for account in self.accounts:
+            account.monthly()
+        self._calc_total()
+
+    def __str__(self):
+        output = ""
+        output += f"Bank {self.name} ------------------------\n"
+        for account in self.accounts:
+            output += str(account) + "\n"
+        output += f"-> Total: {self.total:-15_.2f}€\n"
+        output += f"-----------------------------------------"
+        return output
+
+def load_settings():
+    with open("state.yaml", "r", encoding="utf-8") as f:
+        settings = yaml.load(f, Loader=yaml.SafeLoader)
+        if settings.get("time_goal"):
+            settings["money_goal"] = 1e15
+        elif settings.get("money_goal"):
+            settings["time_goal"] = 12 * 100
+        else:
+            settings["time_goal"] = 12 * 100
+            settings["money_goal"] = 1e15
+
+        settings["profit"] = settings["income"] - settings["upkeep"]
+        return settings
+    return {}
+
+def main():
+    settings = load_settings()
+    if settings["profit"] == 0:
+        print("Equilibrium you spend as much as you earn")
+        return
+    bank = Bank("Accounts")
+    bank.import_dict(settings["accounts"])
+    print(bank)
+    month = 1
+    while month < settings["time_goal"] and 0 <= bank.total <= settings["money_goal"]:
+        print(f"################## Month: {month: 4d} #################")
+        bank.deposit("Checking-Account", 750)
+        bank.deposit("Investment-Account", 750)
+        bank.monthly()
+        print("")
+        print(bank)
+        month += 1
+
+    if month >= settings["time_goal"]:
+        print("Too long, will not work")
+        return
+    if bank.total <= 0:
+        print("#############################")
+        print("You will run out of money in:")
+        print("#############################")
     else:
-        print(f"{key}:\t{value}€")
+        print(f"If all goes to plan you have your {settings['money_goal']:-.2f}€ in:")
+    years = int(month/12)
+    month = month % 12
+    print(f"--> {years} years and {month%12} months")
+    return 0
 
-if (data["gewinn"] == 0 and data["investing"] == 0):
-    print("Equilibrium you spend as much as you earn")
-    sys.exit(0)
-
-print()
-print("--------------")
-print()
-
-bank = 0
-invest = 0
-kapital = data["kapital"] + bank + invest
-months = 0
-
-prev_bank = bank
-prev_invest = invest
-prev_kapital = kapital
-
-MAX_MONTHS = 10000
-
-while(kapital < data["ziel"] and months < MAX_MONTHS and kapital > 0):
-    prev_kapital = kapital
-    prev_bank = bank
-    prev_invest = invest
-
-    # Add einkommen
-    bank += round(data["gewinn"], 2)
-    invest += round(data["investing"], 2)
-    # Calc interest
-    invest = round(invest * (1 + (data["zins"] / 12)), 2)
-    # Calc full capital
-    kapital = data["kapital"] + bank + invest
-
-    months += 1
-    print_status()
-    print("---")
-
-if months >= MAX_MONTHS:
-    print("Too long, will not work")
-    sys.exit(0)
-if kapital <= 0:
-    print("#############################")
-    print("You will run out of money in:")
-    print("#############################")
-else:
-    print(f"If all goes to plan you have your {data['ziel']}€ in:")
-years = int(months/12)
-months = months % 12
-print(f"--> {years} years and {months%12} months")
+if __name__ == '__main__':
+    main()
+    exit(0)
